@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Sopar | ESP Vision - Single ESP Line</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #000000;
+            font-family: 'Courier New', 'Fira Code', monospace;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 12px;
+        }
+
+        .container {
+            max-width: 100%;
+            width: 100%;
+            background: #05050a;
+            border-radius: 28px;
+            border: 1px solid #00ffcc;
+            box-shadow: 0 0 30px rgba(0,255,204,0.3);
+            overflow: hidden;
+            padding: 16px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .header h1 {
+            background: linear-gradient(135deg, #00ffcc, #00ff88);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-size: 1.4rem;
+            letter-spacing: 2px;
+        }
+
+        .header p {
+            color: #00ffcc;
+            font-size: 0.65rem;
+            opacity: 0.9;
+        }
+
+        .camera-container {
+            position: relative;
+            background: #000;
+            border-radius: 20px;
+            overflow: hidden;
+            border: 2px solid #00ffcc;
+            box-shadow: 0 0 15px rgba(0,255,204,0.5);
+        }
+
+        video {
+            width: 100%;
+            display: block;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .info-panel {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 16px;
+            margin-bottom: 12px;
+        }
+
+        .stats {
+            background: #0a0f15;
+            padding: 6px 16px;
+            border-radius: 20px;
+            border-left: 3px solid #00ffcc;
+            font-size: 0.7rem;
+            color: #00ffcc;
+            font-weight: bold;
+        }
+
+        .human-badge {
+            background: #0a0f15;
+            padding: 6px 20px;
+            border-radius: 20px;
+            color: #00ffcc;
+            font-weight: bold;
+            font-size: 1.2rem;
+            border: 1px solid #00ffcc;
+        }
+
+        button {
+            background: linear-gradient(90deg, #0a1a1a, #051010);
+            border: 1px solid #00ffcc;
+            color: #00ffcc;
+            padding: 8px 20px;
+            border-radius: 30px;
+            font-weight: bold;
+            font-family: monospace;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        button:hover {
+            background: #00ffcc;
+            color: black;
+            box-shadow: 0 0 20px #00ffcc;
+        }
+
+        .esp-stats {
+            background: #0a0f15;
+            border-radius: 12px;
+            padding: 10px;
+            margin-top: 12px;
+            font-size: 0.7rem;
+            color: #55ffaa;
+            border: 1px solid #00ffcc;
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .esp-stats span {
+            color: #00ffcc;
+            font-weight: bold;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 12px;
+            font-size: 0.6rem;
+            color: #226655;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>🟢 Sopar | ESP VISION</h1>
+        <p>🔮 ESP GARIS LURUS KE DEPAN | KAMERA DEPAN & BELAKANG | MILIK SOPAR</p>
+    </div>
+
+    <div class="camera-container" style="position: relative;">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="overlayCanvas"></canvas>
+    </div>
+
+    <div class="info-panel">
+        <div class="stats">🧬 ESP MODE: ACTIVE | OWNER: SOPAR</div>
+        <div class="human-badge" id="humanCountDisplay">👥 0</div>
+        <button id="switchCameraBtn">🔄 SWITCH CAM</button>
+    </div>
+
+    <div class="esp-stats">
+        <span>🎯 TARGET LOCKED: <span id="targetCount">0</span></span>
+        <span>📷 CAMERA: <span id="cameraMode">BELAKANG</span></span>
+        <span>⚡ FPS: <span id="fpsCount">0</span></span>
+        <span>📊 AVG CONF: <span id="avgConf">0</span>%</span>
+        <span id="espInfoDetail">🔮 ESP GARIS LURUS ACTIVE</span>
+    </div>
+
+    <div class="footer">
+        🔥 SOPAR | ESP VISION | SINGLE ESP GARIS LURUS | INFO LENGKAP
+    </div>
+</div>
+
+<script>
+    (function() {
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('overlayCanvas');
+        const ctx = canvas.getContext('2d');
+        const humanCountSpan = document.getElementById('humanCountDisplay');
+        const switchBtn = document.getElementById('switchCameraBtn');
+        const cameraModeSpan = document.getElementById('cameraMode');
+        const fpsSpan = document.getElementById('fpsCount');
+        const targetCountSpan = document.getElementById('targetCount');
+        const avgConfSpan = document.getElementById('avgConf');
+        const espInfoDetail = document.getElementById('espInfoDetail');
+        
+        let model = null;
+        let detectionLoopId = null;
+        let currentFacingMode = 'environment';
+        let currentStream = null;
+        
+        let frameCount = 0;
+        let lastTime = performance.now();
+        let currentFps = 0;
+        
+        async function loadModel() {
+            humanCountSpan.innerHTML = "⚡";
+            try {
+                model = await cocoSsd.load({ base: 'mobilenet_v2' });
+                return true;
+            } catch(err) {
+                humanCountSpan.innerHTML = "❌";
+                return false;
+            }
+        }
+        
+        // HANYA SATU ESP: GARIS LURUS PANJANG DARI BAWAH LAYAR KE TARGET (ke depan)
+        function drawSingleEspLine(x, y, width, height) {
+            const centerX = x + width / 2;
+            const centerY = y + height / 2;
+            
+            // GARIS LURUS DARI BAWAH LAYAR (TEPI DEPAN) KE TARGET
+            ctx.beginPath();
+            ctx.moveTo(centerX, canvas.height);
+            ctx.lineTo(centerX, centerY);
+            ctx.strokeStyle = '#00ffcc';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([10, 8]);
+            ctx.stroke();
+            
+            // GARIS LURUS DARI ATAS KE TARGET (opsional biar keren)
+            ctx.beginPath();
+            ctx.moveTo(centerX, 0);
+            ctx.lineTo(centerX, centerY);
+            ctx.stroke();
+            
+            ctx.setLineDash([]);
+            
+            // Titik radar kecil di target
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 8, 0, 2 * Math.PI);
+            ctx.fillStyle = 'rgba(0, 255, 204, 0.4)';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 3, 0, 2 * Math.PI);
+            ctx.fillStyle = '#00ffcc';
+            ctx.fill();
+        }
+        
+        // TAMPILAN JARAK DI SAMPING TARGET
+        function drawDistanceLabel(x, y, width, height, confidence, targetId, distance) {
+            const centerX = x + width / 2;
+            const centerY = y + height / 2;
+            
+            // Kotak transparan untuk info jarak
+            ctx.font = 'bold 10px "Courier New"';
+            ctx.fillStyle = '#00ffcc';
+            ctx.shadowBlur = 3;
+            ctx.shadowColor = '#00ffcc';
+            ctx.fillText(`🎯 TARGET #${targetId} | ${confidence}%`, x, y - 6);
+            
+            // JARAK di samping kanan target
+            ctx.font = 'bold 14px monospace';
+            ctx.fillStyle = '#ff3366';
+            ctx.fillText(`${distance}m`, x + width + 8, centerY + 4);
+            
+            ctx.font = '8px monospace';
+            ctx.fillStyle = '#88ffdd';
+            ctx.fillText(`ESP LOCK`, x + width + 8, centerY - 6);
+            
+            ctx.shadowBlur = 0;
+        }
+        
+        async function detectHumans() {
+            if (!model || !video.videoWidth || !video.videoHeight) {
+                requestAnimationFrame(detectHumans);
+                return;
+            }
+            
+            frameCount++;
+            const now = performance.now();
+            if (now - lastTime >= 1000) {
+                currentFps = frameCount;
+                frameCount = 0;
+                lastTime = now;
+                if (fpsSpan) fpsSpan.innerText = currentFps;
+            }
+            
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            try {
+                const predictions = await model.detect(video);
+                const humans = predictions.filter(p => p.class === 'person');
+                const total = humans.length;
+                humanCountSpan.innerHTML = `👥 ${total}`;
+                if (targetCountSpan) targetCountSpan.innerText = total;
+                
+                const avgConf = total > 0 ? (humans.reduce((sum, h) => sum + h.score, 0) / total * 100).toFixed(1) : 0;
+                if (avgConfSpan) avgConfSpan.innerText = avgConf;
+                if (espInfoDetail) {
+                    espInfoDetail.innerHTML = `🔮 ESP GARIS LURUS | AVG CONF: ${avgConf}%`;
+                }
+                
+                humans.forEach((person, idx) => {
+                    const [x, y, w, h] = person.bbox;
+                    const confidence = Math.round(person.score * 100);
+                    
+                    // Hitung jarak simulasi berdasarkan ukuran bounding box (makin besar makin dekat)
+                    const area = w * h;
+                    const frameArea = canvas.width * canvas.height;
+                    const distance = (1 - (area / frameArea) * 0.8) * 12 + 0.5;
+                    const finalDistance = Math.max(0.8, Math.min(15, distance)).toFixed(1);
+                    
+                    // HANYA SATU ESP: garis lurus
+                    drawSingleEspLine(x, y, w, h);
+                    
+                    // Kotak tipis tanpa esp box ramai
+                    ctx.strokeStyle = '#00ffcc';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, w, h);
+                    
+                    // Label jarak dan info
+                    drawDistanceLabel(x, y, w, h, confidence, idx + 1, finalDistance);
+                });
+                
+                // WATERMARK INFO LENGKAP DI ATAS LAYAR
+                ctx.font = 'bold 9px monospace';
+                ctx.fillStyle = '#00ffcc';
+                ctx.shadowBlur = 0;
+                ctx.fillText(`🔮 Sopar ESP VISION | ${new Date().toLocaleTimeString()} | FPS: ${currentFps}`, 10, 18);
+                
+                const cameraText = currentFacingMode === 'environment' ? '📷 KAMERA BELAKANG' : '🤳 KAMERA DEPAN';
+                ctx.fillText(`${cameraText} | ESP GARIS LURUS ACTIVE`, 10, 34);
+                
+                if (total === 0) {
+                    ctx.fillStyle = 'rgba(0, 255, 204, 0.7)';
+                    ctx.font = 'italic 10px monospace';
+                    ctx.fillText(`◉ SCANNING... TIDAK ADA TARGET MANUSIA`, 10, 55);
+                } else {
+                    ctx.fillStyle = '#ff3366';
+                    ctx.font = 'bold 10px monospace';
+                    ctx.fillText(`⚠️ ${total} MANUSIA TERDETEKSI - ESP LOCKED ⚠️`, 10, 55);
+                    
+                    humans.forEach((person, idx) => {
+                        const [x, y, w, h] = person.bbox;
+                        const conf = Math.round(person.score * 100);
+                        const area = w * h;
+                        const frameArea = canvas.width * canvas.height;
+                        const dist = (1 - (area / frameArea) * 0.8) * 12 + 0.5;
+                        const finalDist = Math.max(0.8, Math.min(15, dist)).toFixed(1);
+                        ctx.font = '7px monospace';
+                        ctx.fillStyle = '#88ffcc';
+                        ctx.fillText(`#${idx+1}: ${conf}% | JARAK: ${finalDist}m | X:${Math.round(x)}`, 10, 72 + (idx * 10));
+                    });
+                }
+                
+                // Garis batas estetik
+                ctx.strokeStyle = 'rgba(0, 255, 204, 0.2)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([2, 8]);
+                ctx.strokeRect(5, 5, canvas.width - 10, canvas.height - 10);
+                ctx.setLineDash([]);
+                
+            } catch(e) {
+                console.warn(e);
+            }
+            
+            detectionLoopId = requestAnimationFrame(detectHumans);
+        }
+        
+        async function startCamera(facingMode) {
+            if (currentStream) {
+                const tracks = currentStream.getTracks();
+                tracks.forEach(track => track.stop());
+            }
+            
+            const modeText = facingMode === 'environment' ? 'BELAKANG' : 'DEPAN';
+            console.log(`[Sopar] Mengaktifkan kamera ${modeText}`);
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { exact: facingMode } }
+                });
+                video.srcObject = stream;
+                currentStream = stream;
+                await video.play();
+                
+                if (cameraModeSpan) cameraModeSpan.innerText = facingMode === 'environment' ? 'BELAKANG' : 'DEPAN';
+                
+                video.addEventListener('loadedmetadata', () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    if (!detectionLoopId) detectHumans();
+                }, { once: true });
+                return true;
+            } catch(err) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: facingMode }
+                    });
+                    video.srcObject = stream;
+                    currentStream = stream;
+                    await video.play();
+                    if (cameraModeSpan) cameraModeSpan.innerText = facingMode === 'environment' ? 'BELAKANG' : 'DEPAN';
+                    return true;
+                } catch(e) {
+                    humanCountSpan.innerHTML = "🚫";
+                    return false;
+                }
+            }
+        }
+        
+        async function switchCamera() {
+            if (detectionLoopId) {
+                cancelAnimationFrame(detectionLoopId);
+                detectionLoopId = null;
+            }
+            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            await startCamera(currentFacingMode);
+        }
+        
+        async function init() {
+            const modelReady = await loadModel();
+            if (!modelReady) return;
+            await startCamera('environment');
+        }
+        
+        switchBtn.addEventListener('click', switchCamera);
+        init();
+    })();
+</script>
+
+</body>
+</html>
